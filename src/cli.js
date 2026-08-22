@@ -5,7 +5,7 @@ import { CCHubClient } from "./cc-hub-client.js";
 import { collectData, localDate, timestamp } from "./collector.js";
 import { loadConfig } from "./config.js";
 import { AppError, asErrorMessage } from "./errors.js";
-import { DEFAULT_CONFIG_FILE, PROJECT_DIR } from "./paths.js";
+import { DEFAULT_CONFIG_FILE, DEFAULT_OUTPUT_DIR } from "./paths.js";
 import { renderReport } from "./report.js";
 
 const HELP = `CC Hub 用量采集与报告工具
@@ -17,7 +17,7 @@ const HELP = `CC Hub 用量采集与报告工具
 
 命令:
   collect  登录 CC Hub 并保存原始 JSON
-  report   从已有 cc-hub-raw-* 目录生成 Markdown
+  report   从 output/ 下的已有 cc-hub-raw-* 目录生成 Markdown
   run      采集数据后立即生成 Markdown
 
 选项:
@@ -68,12 +68,17 @@ function parseArguments(args) {
   return { positional, options };
 }
 
-async function latestRawDir() {
-  const entries = await fs.readdir(PROJECT_DIR, { withFileTypes: true });
+export async function latestRawDir(rootDir = DEFAULT_OUTPUT_DIR) {
+  let entries;
+  try {
+    entries = await fs.readdir(rootDir, { withFileTypes: true });
+  } catch (error) {
+    throw new AppError(`找不到输出目录：${rootDir}`, { cause: error });
+  }
   const candidates = await Promise.all(entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("cc-hub-raw-"))
     .map(async (entry) => {
-      const directory = path.join(PROJECT_DIR, entry.name);
+      const directory = path.join(rootDir, entry.name);
       const complete = await Promise.all(RAW_SNAPSHOT_FILES.map(async (name) => {
         try {
           await fs.access(path.join(directory, name));
@@ -88,7 +93,7 @@ async function latestRawDir() {
     }));
   const completeCandidates = candidates.filter(Boolean);
   if (!completeCandidates.length) {
-    throw new AppError(`找不到完整的 cc-hub-raw-* 数据目录：${PROJECT_DIR}`);
+    throw new AppError(`找不到完整的 cc-hub-raw-* 数据目录：${rootDir}`);
   }
   return completeCandidates.toSorted((left, right) => right.mtimeMs - left.mtimeMs)[0].directory;
 }
@@ -115,7 +120,7 @@ async function createCollector(options, positional) {
   const today = localDate();
   const startDate = positional[0] || today;
   const endDate = positional[1] || startDate;
-  const outputDir = path.resolve(options.outputDir || config.outputDir || path.join(PROJECT_DIR, `cc-hub-raw-${timestamp()}`));
+  const outputDir = path.resolve(options.outputDir || config.outputDir || path.join(DEFAULT_OUTPUT_DIR, `cc-hub-raw-${timestamp()}`));
   const client = new CCHubClient(config);
   return { client, startDate, endDate, outputDir };
 }

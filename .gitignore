@@ -2,6 +2,7 @@
 cc-hub-usage.conf
 
 # Raw responses and generated reports contain account usage data
+output/
 cc-hub-raw-*/
 
 # Local Node.js artifacts
