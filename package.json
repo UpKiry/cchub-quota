@@ -1,0 +1,17 @@
+{
+  "name": "cc-hub-usage-reporter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CC Hub usage collector and Markdown report generator",
+  "bin": {
+    "cc-hub": "./bin/cc-hub.js"
+  },
+  "scripts": {
+    "start": "node ./bin/cc-hub.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

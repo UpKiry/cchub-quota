@@ -1,0 +1,8 @@
+# CC Hub 服务地址（不要在末尾加斜杠）
+CCH_URL="https://cc-hub.example.com"
+
+# 可用于网页登录的 CC Hub 用户 API Key
+CCH_API_KEY="replace-with-your-login-key"
+
+# 可选：自定义原始数据输出目录（相对于本配置文件）
+# CCH_RAW_OUTPUT_DIR="./snapshots"

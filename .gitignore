@@ -1,0 +1,12 @@
+# Local credentials
+cc-hub-usage.conf
+
+# Raw responses and generated reports contain account usage data
+cc-hub-raw-*/
+
+# Local Node.js artifacts
+node_modules/
+npm-debug.log*
+
+# macOS metadata
+.DS_Store
