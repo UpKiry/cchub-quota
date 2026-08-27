@@ -5,5 +5,5 @@ CCH_URL="https://cc-hub.example.com"
 CCH_API_KEY="replace-with-your-login-key"
 
 # 可选：自定义本次原始数据输出目录（相对于本配置文件）
-# 未设置时，默认写入项目根目录的 ./output/cc-hub-raw-时间戳/
+# 未设置时，默认写入项目根目录的 ./output/cc-hub-raw-时间戳-唯一标识/
 # CCH_RAW_OUTPUT_DIR="./output/cc-hub-raw-custom"
