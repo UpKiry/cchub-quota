@@ -52,3 +52,12 @@ test("money distinguishes unlimited from missing and removes meaningless zero pa
   assert.equal(formatMoney(undefined, "CNY"), "-");
   assert.equal(formatMoney(0.1, "CNY"), "0.1 CNY");
 });
+
+test("report sorts usage logs by newest timestamp", () => {
+  const data = fixture();
+  data["usage-logs.json"].items.reverse();
+  const report = buildReport(data, "/tmp/raw", { maxLogs: 2 });
+  const details = report.slice(report.indexOf("## 调用明细"));
+
+  assert.ok(details.indexOf("2026-08-23 00:30:00.123") < details.indexOf("2026-08-23 00:29:00.000"));
+});

@@ -38,8 +38,51 @@ function decodeCursor(token) {
   throw new AppError("调用日志返回了无法解析的分页游标。");
 }
 
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function validateOptionalFields(value, pathname, schema) {
+  const validators = {
+    array: Array.isArray,
+    boolean: (item) => typeof item === "boolean",
+    number: (item) => typeof item === "number" && Number.isFinite(item),
+    numberOrNull: (item) => item === null || (typeof item === "number" && Number.isFinite(item)),
+    stringOrNull: (item) => item === null || typeof item === "string",
+  };
+
+  for (const [field, type] of Object.entries(schema)) {
+    if (value[field] !== undefined && !validators[type](value[field])) {
+      throw new AppError(`${pathname} 字段 ${field} 的类型无效，应为 ${type}。`);
+    }
+  }
+}
+
+function retryDelay(headers, attempt, baseDelay, maxDelay) {
+  const retryAfter = headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return Math.min(maxDelay, Math.max(0, seconds * 1_000));
+    }
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) {
+      return Math.min(maxDelay, Math.max(0, date - Date.now()));
+    }
+  }
+  return Math.min(maxDelay, baseDelay * (2 ** attempt));
+}
+
 export class CCHubClient {
-  constructor({ baseUrl, apiKey, fetchImpl = globalThis.fetch, timeoutMs = 60_000 }) {
+  constructor({
+    baseUrl,
+    apiKey,
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 60_000,
+    maxRetries = 2,
+    retryDelayMs = 250,
+    maxRetryDelayMs = 5_000,
+    sleepImpl = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+  }) {
     if (typeof fetchImpl !== "function") {
       throw new AppError("当前 Node.js 环境不支持 fetch。", { exitCode: 2 });
     }
@@ -47,6 +90,10 @@ export class CCHubClient {
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
     this.timeoutMs = timeoutMs;
+    this.maxRetries = Number.isInteger(maxRetries) && maxRetries >= 0 ? maxRetries : 0;
+    this.retryDelayMs = Number.isFinite(retryDelayMs) && retryDelayMs >= 0 ? retryDelayMs : 250;
+    this.maxRetryDelayMs = Number.isFinite(maxRetryDelayMs) && maxRetryDelayMs >= 0 ? maxRetryDelayMs : 5_000;
+    this.sleepImpl = sleepImpl;
     this.cookie = undefined;
   }
 
@@ -58,18 +105,33 @@ export class CCHubClient {
       headers.set("Cookie", this.cookie);
     }
 
+    const method = (options.method || "GET").toUpperCase();
+    const canRetry = RETRYABLE_METHODS.has(method);
     let response;
-    try {
-      response = await this.fetchImpl(url, {
-        ...options,
-        headers,
-        signal: options.signal ?? AbortSignal.timeout(this.timeoutMs),
-      });
-    } catch (error) {
-      throw new AppError(`无法连接 ${url.origin}${url.pathname}：${asErrorMessage(error)}`, { cause: error });
+    let text;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        response = await this.fetchImpl(url, {
+          ...options,
+          headers,
+          signal: options.signal ?? AbortSignal.timeout(this.timeoutMs),
+        });
+        text = await response.text();
+      } catch (error) {
+        if (!canRetry || attempt >= this.maxRetries || options.signal?.aborted) {
+          throw new AppError(`无法连接 ${url.origin}${url.pathname}：${asErrorMessage(error)}`, { cause: error });
+        }
+        await this.sleepImpl(Math.min(this.maxRetryDelayMs, this.retryDelayMs * (2 ** attempt)));
+        continue;
+      }
+
+      if (canRetry && RETRYABLE_STATUS.has(response.status) && attempt < this.maxRetries) {
+        await this.sleepImpl(retryDelay(response.headers, attempt, this.retryDelayMs, this.maxRetryDelayMs));
+        continue;
+      }
+      break;
     }
 
-    const text = await response.text();
     let body;
     try {
       body = text ? JSON.parse(text) : {};
@@ -113,16 +175,43 @@ export class CCHubClient {
     return (await this.request(url.toString())).body;
   }
 
-  getQuota() {
-    return this.getJson("/api/v1/me/quota");
+  async getQuota() {
+    const body = await this.getJson("/api/v1/me/quota");
+    validateOptionalFields(body, "/api/v1/me/quota", {
+      keyIsEnabled: "boolean",
+      keyCurrent5hUsd: "numberOrNull",
+      keyLimit5hUsd: "numberOrNull",
+      keyCurrentDailyUsd: "numberOrNull",
+      keyLimitDailyUsd: "numberOrNull",
+      keyCurrentWeeklyUsd: "numberOrNull",
+      keyLimitWeeklyUsd: "numberOrNull",
+      keyCurrentMonthlyUsd: "numberOrNull",
+      keyLimitMonthlyUsd: "numberOrNull",
+      keyCurrentTotalUsd: "numberOrNull",
+      keyLimitTotalUsd: "numberOrNull",
+    });
+    return body;
   }
 
-  getToday() {
-    return this.getJson("/api/v1/me/today");
+  async getToday() {
+    const body = await this.getJson("/api/v1/me/today");
+    validateOptionalFields(body, "/api/v1/me/today", {
+      calls: "number",
+      costUsd: "numberOrNull",
+      inputTokens: "number",
+      outputTokens: "number",
+      modelBreakdown: "array",
+    });
+    return body;
   }
 
-  getStatsSummary(startDate, endDate) {
-    return this.getJson("/api/v1/me/usage-logs/stats-summary", { startDate, endDate });
+  async getStatsSummary(startDate, endDate) {
+    const body = await this.getJson("/api/v1/me/usage-logs/stats-summary", { startDate, endDate });
+    validateOptionalFields(body, "/api/v1/me/usage-logs/stats-summary", {
+      totalRequests: "number",
+      totalCost: "numberOrNull",
+    });
+    return body;
   }
 
   async getAllUsageLogs(startDate, endDate, { pageSize = 100, maxPages = 1_000 } = {}) {
@@ -144,7 +233,18 @@ export class CCHubClient {
         throw new AppError("/api/v1/me/usage-logs 响应缺少 items 数组。");
       }
       items.push(...page.items);
-      pageInfo = page.pageInfo && typeof page.pageInfo === "object" ? page.pageInfo : {};
+      if (page.pageInfo !== undefined && (!page.pageInfo || typeof page.pageInfo !== "object" || Array.isArray(page.pageInfo))) {
+        throw new AppError("/api/v1/me/usage-logs 响应的 pageInfo 不是对象。");
+      }
+      pageInfo = page.pageInfo || {};
+      validateOptionalFields(pageInfo, "/api/v1/me/usage-logs", {
+        hasMore: "boolean",
+        nextCursor: "stringOrNull",
+        limit: "number",
+      });
+      if (typeof pageInfo.hasMore !== "boolean") {
+        throw new AppError("/api/v1/me/usage-logs 响应缺少 pageInfo.hasMore 布尔值。");
+      }
       pageCount += 1;
 
       if (!pageInfo.hasMore) {

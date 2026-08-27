@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { AppError } from "./errors.js";
+import { writeAtomicFile } from "./fs-utils.js";
 
 export function localDate(date = new Date(), timeZone = "Asia/Shanghai") {
   return new Intl.DateTimeFormat("sv-SE", {
@@ -50,8 +51,7 @@ export function timestamp(date = new Date(), timeZone = "Asia/Shanghai") {
 
 async function writeJson(directory, name, value) {
   const outputFile = path.join(directory, `${name}.json`);
-  await fs.writeFile(outputFile, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await fs.chmod(outputFile, 0o600);
+  await writeAtomicFile(outputFile, `${JSON.stringify(value, null, 2)}\n`);
   return outputFile;
 }
 
@@ -59,6 +59,9 @@ export async function collectData({ client, startDate, endDate, outputDir, onPro
   validateDateRange(startDate, endDate);
   await fs.mkdir(outputDir, { recursive: true, mode: 0o700 });
   await fs.chmod(outputDir, 0o700);
+  const incompleteMarker = path.join(outputDir, ".incomplete");
+  await fs.writeFile(incompleteMarker, `${process.pid}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.chmod(incompleteMarker, 0o600);
 
   const steps = [
     ["login", () => client.login()],
@@ -79,12 +82,12 @@ export async function collectData({ client, startDate, endDate, outputDir, onPro
         const content = typeof error.responseBody === "string"
           ? error.responseBody
           : `${JSON.stringify(error.responseBody, null, 2)}\n`;
-        await fs.writeFile(outputFile, content, { encoding: "utf8", mode: 0o600 });
-        await fs.chmod(outputFile, 0o600);
+        await writeAtomicFile(path.join(outputDir, `${name}.error.json`), content);
       }
       throw error;
     }
   }
 
+  await fs.rm(incompleteMarker, { force: true });
   return outputDir;
 }

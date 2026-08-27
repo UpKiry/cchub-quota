@@ -108,3 +108,20 @@ export async function loadConfig(configFile) {
     warnings,
   };
 }
+
+export async function loadConfiguredOutputDir(configFile, { optional = false } = {}) {
+  let text;
+  try {
+    text = await fs.readFile(configFile, "utf8");
+  } catch (error) {
+    if (optional && error?.code === "ENOENT") {
+      return undefined;
+    }
+    throw new AppError(`无法读取配置文件：${configFile}`, { exitCode: 2, cause: error });
+  }
+
+  const parsed = parseConfig(text);
+  return parsed.CCH_RAW_OUTPUT_DIR
+    ? path.resolve(path.dirname(configFile), parsed.CCH_RAW_OUTPUT_DIR)
+    : undefined;
+}

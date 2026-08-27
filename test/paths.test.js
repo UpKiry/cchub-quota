@@ -39,3 +39,16 @@ test("latestRawDir searches only complete snapshots under its output root", asyn
     await fs.rm(rootDir, { recursive: true, force: true });
   }
 });
+
+test("latestRawDir accepts a configured snapshot directory and ignores incomplete snapshots", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "cc-hub-configured-path-"));
+  try {
+    const snapshotDir = await createSnapshot(rootDir, "configured", true);
+    await fs.writeFile(path.join(snapshotDir, ".incomplete"), "123\n");
+    await assert.rejects(() => latestRawDir(snapshotDir), /找不到完整/);
+    await fs.rm(path.join(snapshotDir, ".incomplete"));
+    assert.equal(await latestRawDir(snapshotDir), snapshotDir);
+  } finally {
+    await fs.rm(rootDir, { recursive: true, force: true });
+  }
+});

@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { CCHubClient } from "./cc-hub-client.js";
 import { collectData, localDate, timestamp } from "./collector.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadConfiguredOutputDir } from "./config.js";
 import { AppError, asErrorMessage } from "./errors.js";
 import { DEFAULT_CONFIG_FILE, DEFAULT_OUTPUT_DIR } from "./paths.js";
 import { renderReport } from "./report.js";
@@ -17,7 +18,7 @@ const HELP = `CC Hub 用量采集与报告工具
 
 命令:
   collect  登录 CC Hub 并保存原始 JSON
-  report   从 output/ 下的已有 cc-hub-raw-* 目录生成 Markdown
+  report   从配置目录或 output/ 下的已有快照生成 Markdown
   run      采集数据后立即生成 Markdown
 
 选项:
@@ -75,19 +76,36 @@ export async function latestRawDir(rootDir = DEFAULT_OUTPUT_DIR) {
   } catch (error) {
     throw new AppError(`找不到输出目录：${rootDir}`, { cause: error });
   }
+  const isComplete = async (directory) => {
+    try {
+      await fs.access(path.join(directory, ".incomplete"));
+      return false;
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        return false;
+      }
+    }
+
+    const complete = await Promise.all(RAW_SNAPSHOT_FILES.map(async (name) => {
+      try {
+        await fs.access(path.join(directory, name));
+        return true;
+      } catch {
+        return false;
+      }
+    }));
+    return complete.every(Boolean);
+  };
+
+  if (await isComplete(rootDir)) {
+    return rootDir;
+  }
+
   const candidates = await Promise.all(entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("cc-hub-raw-"))
     .map(async (entry) => {
       const directory = path.join(rootDir, entry.name);
-      const complete = await Promise.all(RAW_SNAPSHOT_FILES.map(async (name) => {
-        try {
-          await fs.access(path.join(directory, name));
-          return true;
-        } catch {
-          return false;
-        }
-      }));
-      return complete.every(Boolean)
+      return await isComplete(directory)
         ? { directory, mtimeMs: (await fs.stat(directory)).mtimeMs }
         : undefined;
     }));
@@ -120,7 +138,7 @@ async function createCollector(options, positional) {
   const today = localDate();
   const startDate = positional[0] || today;
   const endDate = positional[1] || startDate;
-  const outputDir = path.resolve(options.outputDir || config.outputDir || path.join(DEFAULT_OUTPUT_DIR, `cc-hub-raw-${timestamp()}`));
+  const outputDir = path.resolve(options.outputDir || config.outputDir || path.join(DEFAULT_OUTPUT_DIR, `cc-hub-raw-${timestamp()}-${randomUUID()}`));
   const client = new CCHubClient(config);
   return { client, startDate, endDate, outputDir };
 }
@@ -152,7 +170,13 @@ async function execute(args) {
     if (positional.length > 1) {
       throw new AppError("report 最多接受一个原始数据目录。", { exitCode: 2 });
     }
-    const rawDir = positional[0] ? path.resolve(positional[0]) : await latestRawDir();
+    const configFile = path.resolve(options.config || DEFAULT_CONFIG_FILE);
+    const configuredOutputDir = positional[0]
+      ? undefined
+      : await loadConfiguredOutputDir(configFile, { optional: !options.config });
+    const rawDir = positional[0]
+      ? path.resolve(positional[0])
+      : await latestRawDir(configuredOutputDir || DEFAULT_OUTPUT_DIR);
     const outputDir = options.outputDir ? path.resolve(options.outputDir) : rawDir;
     const reportFile = await renderReport(rawDir, { outputDir, maxLogs: parseMaxLogs(options.maxLogs) });
     console.log(`Markdown：${reportFile}`);

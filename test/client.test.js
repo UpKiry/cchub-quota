@@ -78,3 +78,73 @@ test("client rejects a successful login without auth-token", async () => {
   });
   await assert.rejects(() => client.login(), /没有 auth-token Cookie/);
 });
+
+test("client retries transient GET failures with an injected delay", async () => {
+  let attempts = 0;
+  const client = new CCHubClient({
+    baseUrl: "https://hub.example.test",
+    apiKey: "unused",
+    fetchImpl: async () => {
+      attempts += 1;
+      return attempts === 1
+        ? jsonResponse({ detail: "temporary" }, { status: 503, headers: { "retry-after": "0" } })
+        : jsonResponse({ calls: 3 });
+    },
+    sleepImpl: async () => {},
+  });
+
+  assert.deepEqual(await client.getToday(), { calls: 3 });
+  assert.equal(attempts, 2);
+});
+
+test("client retries transient response-body failures for GET requests", async () => {
+  let attempts = 0;
+  const client = new CCHubClient({
+    baseUrl: "https://hub.example.test",
+    apiKey: "unused",
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          status: 200,
+          ok: true,
+          headers: new Headers(),
+          text: async () => {
+            throw new TypeError("body reset");
+          },
+        };
+      }
+      return jsonResponse({ calls: 3 });
+    },
+    sleepImpl: async () => {},
+  });
+
+  assert.deepEqual(await client.getToday(), { calls: 3 });
+  assert.equal(attempts, 2);
+});
+
+test("client does not retry login POST failures", async () => {
+  let attempts = 0;
+  const client = new CCHubClient({
+    baseUrl: "https://hub.example.test",
+    apiKey: "key",
+    fetchImpl: async () => {
+      attempts += 1;
+      return jsonResponse({ detail: "temporary" }, { status: 503 });
+    },
+    sleepImpl: async () => {},
+  });
+
+  await assert.rejects(() => client.login(), /HTTP 503/);
+  assert.equal(attempts, 1);
+});
+
+test("client rejects malformed known response fields", async () => {
+  const client = new CCHubClient({
+    baseUrl: "https://hub.example.test",
+    apiKey: "unused",
+    fetchImpl: async () => jsonResponse({ calls: "three" }),
+  });
+
+  await assert.rejects(() => client.getToday(), /字段 calls 的类型无效/);
+});

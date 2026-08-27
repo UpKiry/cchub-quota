@@ -1,6 +1,6 @@
 # CC Hub 用量工具（Node.js）
 
-使用同目录 `cc-hub-usage.conf` 登录 CC Hub，保存原始用量 JSON，并生成 Markdown 报告。默认输出集中在 `output/cc-hub-raw-时间戳/`，要求 Node.js 20 或更高版本，不需要安装第三方依赖。
+使用同目录 `cc-hub-usage.conf` 登录 CC Hub，保存原始用量 JSON，并生成 Markdown 报告。默认输出集中在 `output/cc-hub-raw-时间戳-唯一标识/`；配置了 `CCH_RAW_OUTPUT_DIR` 时，`report` 会自动从该目录读取快照。要求 Node.js 20 或更高版本，不需要安装第三方依赖。
 
 ```bash
 # 抓取今天的数据

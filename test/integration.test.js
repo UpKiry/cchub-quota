@@ -186,6 +186,7 @@ test("collectData and renderReport complete a local HTTP-to-files workflow", asy
       "GET /api/v1/me/usage-logs",
     ]);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(rawDir, "usage-logs.json"))).items.map((item) => item.id), [102, 101]);
+    await assert.rejects(() => fs.access(path.join(rawDir, ".incomplete")));
     assert.equal(await permission(rawDir), 0o700);
     for (const name of ["login", "quota", "today", "stats-summary", "usage-logs"]) {
       assert.equal(await permission(path.join(rawDir, `${name}.json`)), 0o600);

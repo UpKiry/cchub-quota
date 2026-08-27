@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { AppError } from "./errors.js";
+import { writeAtomicFile } from "./fs-utils.js";
 
 const REQUIRED_FILES = [
   "login.json",
@@ -155,7 +156,18 @@ export function buildReport(data, rawDir, { maxLogs = 30, timeZone = "Asia/Shang
       formatNumber(item.outputTokens),
     ]);
 
-  const visibleLogs = logs.slice(0, maxLogs);
+  const sortedLogs = logs.toSorted((left, right) => {
+    const leftTime = Date.parse(left.createdAt);
+    const rightTime = Date.parse(right.createdAt);
+    if (Number.isNaN(leftTime)) {
+      return Number.isNaN(rightTime) ? 0 : 1;
+    }
+    if (Number.isNaN(rightTime)) {
+      return -1;
+    }
+    return rightTime - leftTime;
+  });
+  const visibleLogs = sortedLogs.slice(0, maxLogs);
   const logRows = visibleLogs.map((item) => [
     formatDateTime(item.createdAt, timeZone),
     item.model ?? "-",
@@ -215,7 +227,6 @@ export async function renderReport(rawDir, { outputDir = rawDir, maxLogs = 30, t
   await fs.mkdir(resolvedOutputDir, { recursive: true, mode: 0o700 });
   await fs.chmod(resolvedOutputDir, 0o700);
   const outputFile = path.join(resolvedOutputDir, "cc-hub-report.md");
-  await fs.writeFile(outputFile, markdown, { encoding: "utf8", mode: 0o600 });
-  await fs.chmod(outputFile, 0o600);
+  await writeAtomicFile(outputFile, markdown);
   return outputFile;
 }
